@@ -1200,6 +1200,177 @@
                 font-family: "Consolas", monospace;
                 color: #d4d4d4;
             }
+            /* ---- Analysis list view ---- */
+            #listPanel {
+                flex: 1;
+                overflow-y: auto;
+                padding: 18px 24px 32px;
+                display: none;
+                min-width: 0;
+            }
+            #listPanel.active {
+                display: block;
+            }
+            #listPanel .list-search-wrap {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                position: sticky;
+                top: 0;
+                background: inherit;
+                padding: 2px 0 12px;
+                z-index: 5;
+            }
+            #listSearch {
+                flex: 1;
+                min-width: 0;
+                background: #2a2a2e;
+                color: #f2f2f2;
+                border: 1px solid #3e3e42;
+                border-radius: 6px;
+                padding: 9px 14px;
+                font-size: 14px;
+                outline: none;
+                font-family: inherit;
+            }
+            #listSearch:focus {
+                border-color: #569cd6;
+                box-shadow: 0 0 0 2px rgba(86, 156, 214, 0.25);
+            }
+            #listSearch::placeholder {
+                color: #858585;
+            }
+            body.lm #listSearch {
+                background: #fff;
+                color: #111;
+                border-color: #ccc;
+            }
+            #listCount {
+                flex: 0 0 auto;
+                color: #858585;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+            #listBody {
+                min-height: 40px;
+            }
+            .list-item {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 10px 14px;
+                margin: 4px 0;
+                background: #252526;
+                border-radius: 6px;
+                border-left: 3px solid #3e3e42;
+                cursor: pointer;
+                transition: background 0.12s, border-color 0.12s;
+                font-family: inherit;
+                color: #d4d4d4;
+                text-align: left;
+                width: 100%;
+            }
+            .list-item:hover {
+                background: #2d2d32;
+                border-left-color: #569cd6;
+            }
+            .list-item.active {
+                border-left-color: #569cd6;
+                background: #2b2b31;
+            }
+            body.lm .list-item {
+                background: #eee;
+                color: #222;
+                border-left-color: #ccc;
+            }
+            body.lm .list-item:hover {
+                background: #e2e2e6;
+                border-left-color: #0078d4;
+            }
+            .list-main {
+                flex: 1;
+                min-width: 0;
+            }
+            .list-name {
+                font-size: 14px;
+                font-weight: 600;
+                color: #f2f2f2;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .list-name mark {
+                background: #569cd6;
+                color: #fff;
+                border-radius: 2px;
+                padding: 0 1px;
+                font-weight: 700;
+            }
+            body.lm .list-name mark {
+                background: #0078d4;
+            }
+            body.lm .list-name {
+                color: #111;
+            }
+            .list-sub {
+                font-size: 12px;
+                color: #858585;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                margin-top: 2px;
+            }
+            .list-sub mark {
+                background: rgba(86, 156, 214, 0.35);
+                color: inherit;
+                border-radius: 2px;
+                padding: 0 1px;
+            }
+            body.lm .list-sub mark {
+                background: rgba(0, 120, 212, 0.2);
+            }
+            .list-meta {
+                flex: 0 0 auto;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 11px;
+                color: #858585;
+            }
+            .list-type {
+                padding: 2px 8px;
+                border-radius: 10px;
+                background: #3e3e42;
+                color: #d4d4d4;
+                font-weight: 600;
+                text-transform: uppercase;
+                letter-spacing: 0.4px;
+                font-size: 10px;
+            }
+            body.lm .list-type {
+                background: #ddd;
+                color: #333;
+            }
+            .list-type.t-ab {
+                color: #4ec9b0;
+            }
+            .list-type.t-tool {
+                color: #ce9178;
+            }
+            .list-done {
+                color: #00c853;
+            }
+            .list-empty {
+                color: #858585;
+                font-style: italic;
+                padding: 26px 8px;
+                text-align: center;
+            }
+            .list-empty strong {
+                color: #569cd6;
+                font-style: normal;
+            }
+
             body.lm {
                 background: #fff;
                 color: #333;
@@ -1490,6 +1661,7 @@
             <div id="tab-bar">
                 <span class="suite-label">EHS Tools</span>
                 <button class="tab-btn" id="tabMap">🗺 Map</button>
+                <button class="tab-btn" id="tabList">☰ List</button>
                 <button class="tab-btn active" id="tab5y">5Y Tree</button>
                 <button class="tab-btn" id="tabActions">Actions</button>
                 <button class="tab-btn" id="tabAbout">About</button>
@@ -1636,6 +1808,19 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     <div id="canvasWrap"><div id="stage"></div></div>
                     <div id="actionPanel"></div>
                     <div id="aboutPanel"></div>
+                    <div id="listPanel">
+                        <div class="list-search-wrap">
+                            <input
+                                id="listSearch"
+                                type="text"
+                                placeholder="🔍 Search analyses… (fuzzy)"
+                                autocomplete="off"
+                                spellcheck="false"
+                            />
+                            <span id="listCount"></span>
+                        </div>
+                        <div id="listBody"></div>
+                    </div>
                     <div id="legendPanel"></div>
                     <div id="info">
                         <h3>How to Use</h3>
@@ -1752,6 +1937,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             var legendPanel = document.getElementById("legendPanel");
             var lineGutter = document.getElementById("lineGutter");
             var statusBar = document.getElementById("statusBar");
+            var listPanel = document.getElementById("listPanel");
+            var listSearch = document.getElementById("listSearch");
+            var listBody = document.getElementById("listBody");
+            var listCount = document.getElementById("listCount");
             var sbStats = document.getElementById("sbStats");
             var sbUndo = document.getElementById("sbUndo");
             var actionPanel = document.getElementById("actionPanel");
@@ -2155,7 +2344,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 if (!bc) return;
                 var html =
                     '<span class="crumb crumb-map" onclick="showMap()">\uD83D\uDDFA Map</span>';
-                if (mode === "analysis" && currentId) {
+                if (activeTab === "list") {
+                    html += '<span class="crumb-sep">\u203A</span>';
+                    html += '<span class="crumb crumb-current">\u2630 List</span>';
+                } else if (mode === "analysis" && currentId) {
                     var path = mapPathToProject(currentId);
                     path.forEach(function (seg, i) {
                         html += '<span class="crumb-sep">\u203A</span>';
@@ -2179,6 +2371,9 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         "active",
                         mode === "map" && activeTab === "5y",
                     );
+                var listTab = document.getElementById("tabList");
+                if (listTab)
+                    listTab.classList.toggle("active", activeTab === "list");
                 // The primary diagram tab is contextual: it shows the 5-Why tree
                 // for 5why analyses (and the map), or the ABC chart for ABC ones.
                 var tab5y = document.getElementById("tab5y");
@@ -6885,6 +7080,269 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             }
 
             /* ---- Action items panel ---- */
+            /* ---- Analysis list view (fuzzy search) ---- */
+            // VS Code quick-open style subsequence matcher. Returns a score
+            // (lower = better) when q is a subsequence of s, else -1.
+            function fuzzyScore(q, s) {
+                if (!q) return 0;
+                q = q.toLowerCase();
+                s = s.toLowerCase();
+                var qi = 0,
+                    si = 0,
+                    score = 0,
+                    prev = -10;
+                while (qi < q.length && si < s.length) {
+                    if (q[qi] === s[si]) {
+                        if (si === prev + 1) score -= 1; // contiguous bonus
+                        else score += si - prev; // penalise the skipped gap
+                        if (si === 0 || /[\s\-_./()]/.test(s[si - 1]))
+                            score -= 2; // word-boundary bonus
+                        prev = si;
+                        qi++;
+                    }
+                    si++;
+                }
+                if (qi < q.length) return -1;
+                score += s.length - prev - 1; // penalise leftover tail
+                return score;
+            }
+            // Wrap the query's matched characters in <mark> for the snippet.
+            function fuzzyHighlight(q, s) {
+                var html = "";
+                q = q.toLowerCase();
+                var qi = 0;
+                for (var i = 0; i < s.length; i++) {
+                    if (qi < q.length && s[i].toLowerCase() === q[qi]) {
+                        html += "<mark>" + escapeHtml(s[i]) + "</mark>";
+                        qi++;
+                    } else html += escapeHtml(s[i]);
+                }
+                return html;
+            }
+            function analysisTypeOf(p) {
+                if (p && p.type === "abc") return "abc";
+                if (p) {
+                    try {
+                        if (detectTool(p.text || "")) return "tool";
+                    } catch (e) {}
+                }
+                return "5why";
+            }
+            // Human-readable excerpt of an analysis: the first meaningful line
+            // with @colour, #tag and \\action sigils stripped out.
+            function firstMeaningfulLine(text) {
+                var lines = (text || "").split("\n");
+                for (var i = 0; i < lines.length; i++) {
+                    var t = lines[i].trim();
+                    if (!t) continue;
+                    t = t.replace(/^>+\s*/, "");
+                    t = t.replace(/(^|\s)@\w+/g, " ");
+                    t = t.replace(/(^|\s)#[\p{L}\p{N}_-]+/gu, " ");
+                    t = t.replace(/(^|\s)\\.+$/, "");
+                    t = t.replace(/\s+/g, " ").trim();
+                    if (t) return t;
+                }
+                return "";
+            }
+            // Node / action / done counts for an analysis, memoised per edit so
+            // re-typing in the search box doesn't re-parse every project.
+            var listSummaryCache = {};
+            function cachedListSummary(id) {
+                var p = projects.items[id];
+                if (!p) return { nodes: 0, actions: 0, done: 0 };
+                var key = p.text || "";
+                var c = listSummaryCache[id];
+                if (c && c.key === key) return c;
+                var sm = parseInput(key);
+                var pd = p.done || {};
+                var done = 0;
+                (sm.actions || []).forEach(function (a) {
+                    if (pd[actionKey(a)]) done++;
+                });
+                c = {
+                    key: key,
+                    nodes: sm.nodes ? sm.nodes.length : 0,
+                    actions: sm.actions ? sm.actions.length : 0,
+                    done: done,
+                };
+                listSummaryCache[id] = c;
+                return c;
+            }
+            // Rank every analysis (except the map) against the fuzzy query.
+            function listAnalyses(query) {
+                var results = [];
+                projects.order.forEach(function (id) {
+                    if (id === projects.mapId) return;
+                    var p = projects.items[id];
+                    if (!p) return;
+                    var name = p.name || "Untitled";
+                    var sub = firstMeaningfulLine(p.text || "");
+                    var sName = fuzzyScore(query, name);
+                    var sSub = sub ? fuzzyScore(query, sub) : -1;
+                    var best = sName,
+                        mrk = "name";
+                    if (sSub >= 0 && (best < 0 || sSub < best)) {
+                        best = sSub;
+                        mrk = "sub";
+                    }
+                    var sm = cachedListSummary(id);
+                    results.push({
+                        id: id,
+                        score: best,
+                        mrk: mrk,
+                        name: name,
+                        sub: sub,
+                        type: analysisTypeOf(p),
+                        nodes: sm.nodes,
+                        actions: sm.actions,
+                        done: sm.done,
+                    });
+                });
+                results.sort(function (a, b) {
+                    var an = a.score < 0,
+                        bn = b.score < 0;
+                    if (an !== bn) return an ? 1 : -1; // matches first
+                    var at = a.mrk === "name" ? 0 : 1;
+                    var bt = b.mrk === "name" ? 0 : 1;
+                    if (at !== bt) return at - bt; // name-tier before sub-tier
+                    if (a.score !== b.score) return a.score - b.score;
+                    return a.name.localeCompare(b.name);
+                });
+                return { results: results, total: projects.order.length - 1 };
+            }
+            function renderList() {
+                var q = (listSearch.value || "").trim();
+                var data = listAnalyses(q);
+                var html = "",
+                    shown = 0;
+                data.results.forEach(function (r) {
+                    if (r.score < 0) return; // unmatched trail at the end
+                    shown++;
+                    var labelName = q
+                        ? fuzzyHighlight(q, r.name)
+                        : escapeHtml(r.name);
+                    var labelSub = r.sub
+                        ? q
+                            ? fuzzyHighlight(q, r.sub)
+                            : escapeHtml(r.sub)
+                        : "";
+                    var tcls =
+                        r.type === "abc"
+                            ? "t-ab"
+                            : r.type === "tool"
+                              ? "t-tool"
+                              : "";
+                    var tlabel =
+                        r.type === "abc" ? "ABC" : r.type === "tool" ? "TOOL" : "5Y";
+                    var allDone =
+                        r.actions > 0 && r.done === r.actions;
+                    html +=
+                        '<button type="button" class="list-item" data-id="' +
+                        r.id +
+                        '"><span class="list-main"><span class="list-name">' +
+                        labelName +
+                        "</span>" +
+                        (labelSub
+                            ? '<span class="list-sub">' + labelSub + "</span>"
+                            : "") +
+                        "</span><span class=\"list-meta\"><span class=\"list-type " +
+                        tcls +
+                        '">' +
+                        tlabel +
+                        "</span><span>" +
+                        r.nodes +
+                        " nodes</span>" +
+                        (r.actions
+                            ? "<span>" + r.actions + " actions</span>"
+                            : "") +
+                        (allDone
+                            ? '<span class="list-done">✓ done</span>'
+                            : "") +
+                        "</span></button>";
+                });
+                if (!shown) {
+                    html = q
+                        ? '<div class="list-empty">No analyses match <strong>' +
+                          escapeHtml(q) +
+                          "</strong>.</div>"
+                        : '<div class="list-empty">No analyses yet. Create one with <strong>+ New</strong>.</div>';
+                }
+                listBody.innerHTML = html;
+                listCount.textContent = q
+                    ? shown + " / " + data.total + " analyses"
+                    : data.total + " analyses";
+                if (mode === "analysis" && currentId) {
+                    var cur = listBody.querySelector(
+                        '.list-item[data-id="' + currentId + '"]',
+                    );
+                    if (cur) cur.classList.add("active");
+                }
+            }
+            // Clicking an analysis opens it in the normal editor.
+            function setupList() {
+                listBody.addEventListener("click", function (e) {
+                    var el =
+                        e.target && e.target.closest
+                            ? e.target.closest(".list-item")
+                            : null;
+                    if (!el) return;
+                    var id = el.getAttribute("data-id");
+                    if (id) openAnalysis(id);
+                });
+                listSearch.addEventListener("input", function () {
+                    renderList();
+                });
+                listSearch.addEventListener("keydown", function (e) {
+                    // Enter opens the best match; arrows move focus in the list.
+                    var items = listBody.querySelectorAll(".list-item");
+                    if (e.key === "Enter" && items.length) {
+                        e.preventDefault();
+                        openAnalysis(items[0].getAttribute("data-id"));
+                    } else if (
+                        (e.key === "ArrowDown" || e.key === "ArrowUp") &&
+                        items.length
+                    ) {
+                        e.preventDefault();
+                        var cur = listBody.querySelector(".list-item:focus");
+                        var idx = cur ? Array.prototype.indexOf.call(items, cur) : -1;
+                        var ni =
+                            e.key === "ArrowDown"
+                                ? Math.min(idx + 1, items.length - 1)
+                                : Math.max(idx - 1, 0);
+                        items[ni].focus();
+                    }
+                });
+            }
+            // Full-focus list chrome: hide the editor panel and show the list.
+            // We remember the panel's prior visibility so leaving the List tab
+            // restores it instead of clobbering the user's Hide/Show toggle.
+            var listLeftWasHidden = null;
+            function applyListMode(on) {
+                var left = document.getElementById("left");
+                if (on) {
+                    if (listLeftWasHidden === null)
+                        listLeftWasHidden = left.classList.contains("hidden");
+                    if (!left.classList.contains("hidden")) {
+                        left.classList.add("hidden");
+                        document.getElementById("toggle").textContent = "Show";
+                    }
+                    listPanel.classList.add("active");
+                    actionPanel.classList.remove("active");
+                    aboutPanel.classList.remove("active");
+                } else {
+                    if (listLeftWasHidden !== null) {
+                        left.classList.toggle("hidden", listLeftWasHidden);
+                        document.getElementById("toggle").textContent = listLeftWasHidden
+                            ? "Show"
+                            : "Hide";
+                        listLeftWasHidden = null;
+                    }
+                    listPanel.classList.remove("active");
+                    actionPanel.classList.remove("active");
+                    aboutPanel.classList.remove("active");
+                }
+            }
+
             function renderActions() {
                 if (!model) {
                     actionPanel.innerHTML =
@@ -7028,6 +7486,20 @@ Burnt product on line 3 @red #Machine \Investigate root cause
 
             /* ---- Main render ---- */
             function render() {
+                // The List tab is a full-focus browser: hide the editor and
+                // show the fuzzy-searchable analysis list. Handled here so it
+                // applies to both 5why and ABC pipelines.
+                if (activeTab === "list") {
+                    try {
+                        applyListMode(true);
+                        renderList();
+                    } catch (err) {
+                        applyListMode(false);
+                    }
+                    broadcastLiveState();
+                    return;
+                }
+                applyListMode(false);
                 // ABC analysis takes a completely different pipeline.
                 if (activeType === "abc" && mode === "analysis") {
                     renderAbcMode();
@@ -7385,6 +7857,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         .classList.add("active");
                 else if (tab === "about")
                     document.getElementById("tabAbout").classList.add("active");
+                else if (tab === "list") {
+                    saveToStorage(); // persist whatever we're leaving
+                    document.getElementById("tabList").classList.add("active");
+                }
                 updateChrome();
                 render();
             }
@@ -7655,6 +8131,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             document.getElementById("tabMap").onclick = function () {
                 switchTab("map");
             };
+            document.getElementById("tabList").onclick = function () {
+                switchTab("list");
+            };
+            setupList();
             document.getElementById("projNew").onclick = newAnalysisFlow;
             document.getElementById("projRename").onclick = renameCurrent;
             document.getElementById("projDup").onclick = duplicateCurrent;
