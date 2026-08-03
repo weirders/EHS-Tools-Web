@@ -545,6 +545,98 @@
                 background: #f0f0f0;
             }
             /* ---- New-analysis modal ---- */
+            /* ---- Ctrl+P quick-open overlay ---- */
+            #quickOverlay {
+                position: fixed;
+                inset: 0;
+                z-index: 600;
+                background: rgba(0, 0, 0, 0.5);
+                display: flex;
+                align-items: flex-start;
+                justify-content: center;
+                padding-top: 12vh;
+            }
+            #quickBox {
+                width: min(620px, 92vw);
+                max-height: 70vh;
+                display: flex;
+                flex-direction: column;
+                background: #252526;
+                color: #d4d4d4;
+                border: 1px solid #555;
+                border-radius: 8px;
+                box-shadow: 0 12px 60px rgba(0, 0, 0, 0.6);
+                overflow: hidden;
+            }
+            .quick-head {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                border-bottom: 1px solid #3e3e42;
+                padding: 10px 14px;
+            }
+            #quickInput {
+                flex: 1;
+                min-width: 0;
+                background: transparent;
+                border: none;
+                color: #f2f2f2;
+                font-size: 16px;
+                outline: none;
+                font-family: inherit;
+            }
+            #quickInput::placeholder {
+                color: #858585;
+            }
+            #quickCount {
+                flex: 0 0 auto;
+                color: #858585;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+            #quickBody {
+                overflow-y: auto;
+                padding: 8px;
+                max-height: 52vh;
+            }
+            #quickBody .list-item {
+                margin: 2px 0;
+            }
+            #quickBody .list-item:hover,
+            #quickBody .list-item.selected {
+                background: #2d2d32;
+                border-left-color: #569cd6;
+            }
+            body.lm #quickBox {
+                background: #fff;
+                color: #222;
+                border-color: #ccc;
+            }
+            body.lm #quickInput {
+                color: #111;
+            }
+            .quick-foot {
+                display: flex;
+                gap: 16px;
+                padding: 8px 14px;
+                border-top: 1px solid #3e3e42;
+                color: #858585;
+                font-size: 11px;
+            }
+            .quick-foot kbd {
+                background: #3e3e42;
+                padding: 1px 5px;
+                border-radius: 3px;
+                font-size: 10px;
+                border: 1px solid #555;
+                color: #d4d4d4;
+                font-family: "Consolas", monospace;
+            }
+            body.lm .quick-foot kbd {
+                background: #eee;
+                color: #333;
+                border-color: #bbb;
+            }
             #newOverlay {
                 position: fixed;
                 inset: 0;
@@ -1657,6 +1749,26 @@
                 </div>
             </div>
         </div>
+        <div id="quickOverlay" hidden>
+            <div id="quickBox" role="dialog" aria-modal="true" aria-label="Open analysis">
+                <div class="quick-head">
+                    <input
+                        id="quickInput"
+                        type="text"
+                        placeholder="Type to find an analysis…"
+                        autocomplete="off"
+                        spellcheck="false"
+                    />
+                    <span id="quickCount"></span>
+                </div>
+                <div id="quickBody"></div>
+                <div class="quick-foot">
+                    <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+                    <span><kbd>Enter</kbd> open</span>
+                    <span><kbd>Esc</kbd> close</span>
+                </div>
+            </div>
+        </div>
         <div id="app">
             <div id="tab-bar">
                 <span class="suite-label">EHS Tools</span>
@@ -1722,6 +1834,14 @@
                                 role="menuitem"
                             >
                                 Export selected…
+                            </button>
+                            <button
+                                id="mCopyLink"
+                                class="menu-item"
+                                role="menuitem"
+                                title="Copy a shareable link to the current analysis or map"
+                            >
+                                Copy link to current…
                             </button>
                             <div class="menu-sep"></div>
                             <button
@@ -2299,6 +2419,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 loadIntoEditor(projectById(projects.mapId), true);
                 updateChrome();
                 render();
+                emitHash();
             }
             function openAnalysis(id, resetTab) {
                 var p = projectById(id);
@@ -2310,6 +2431,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 loadIntoEditor(p, true);
                 updateChrome();
                 render();
+                emitHash();
             }
             // Find the ancestor path (names) to a link node in the map, for the
             // breadcrumb. Returns array of label strings ending in the target.
@@ -7168,31 +7290,75 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 listSummaryCache[id] = c;
                 return c;
             }
+            // Full-text searchable index per analysis: name plus one snippet per
+            // node line, action and tag, so a query can surface a match buried
+            // deep in the analysis (and show the exact line that matched).
+            var listSearchIndex = {};
+            function searchIndexFor(id) {
+                var p = projects.items[id];
+                if (!p) return null;
+                var key = p.text || "";
+                var c = listSearchIndex[id];
+                if (c && c.key === key) return c;
+                var sm = parseInput(key);
+                var snippets = [];
+                (sm.nodes || []).forEach(function (n) {
+                    if (n.text) snippets.push({ t: n.text, k: 0 });
+                });
+                (sm.actions || []).forEach(function (a) {
+                    if (a.text) snippets.push({ t: a.text, k: 1 });
+                });
+                (sm.tags || []).forEach(function (tg) {
+                    if (tg && tg.display) snippets.push({ t: tg.display, k: 2 });
+                });
+                c = {
+                    key: key,
+                    name: p.name || "Untitled",
+                    defaultSub: firstMeaningfulLine(key),
+                    snippets: snippets,
+                };
+                listSearchIndex[id] = c;
+                return c;
+            }
             // Rank every analysis (except the map) against the fuzzy query.
+            // Matches the name (strongest) or any full-text snippet. A deeper
+            // snippet that matched is surfaced as the row's context line.
             function listAnalyses(query) {
                 var results = [];
                 projects.order.forEach(function (id) {
                     if (id === projects.mapId) return;
-                    var p = projects.items[id];
-                    if (!p) return;
-                    var name = p.name || "Untitled";
-                    var sub = firstMeaningfulLine(p.text || "");
-                    var sName = fuzzyScore(query, name);
-                    var sSub = sub ? fuzzyScore(query, sub) : -1;
-                    var best = sName,
+                    var idx = searchIndexFor(id);
+                    if (!idx) return;
+                    var sName = fuzzyScore(query, idx.name);
+                    var bestSub = -1,
+                        bestSnippet = null;
+                    for (var i = 0; i < idx.snippets.length; i++) {
+                        var s = fuzzyScore(query, idx.snippets[i].t);
+                        if (s >= 0 && (bestSub < 0 || s < bestSub)) {
+                            bestSub = s;
+                            bestSnippet = idx.snippets[i].t;
+                        }
+                    }
+                    var score = sName,
+                        mrk = "name",
+                        sub = "";
+                    if (sName >= 0 && (bestSub < 0 || sName <= bestSub)) {
+                        score = sName;
                         mrk = "name";
-                    if (sSub >= 0 && (best < 0 || sSub < best)) {
-                        best = sSub;
+                        sub = idx.defaultSub;
+                    } else if (bestSub >= 0) {
+                        score = bestSub;
                         mrk = "sub";
+                        sub = bestSnippet;
                     }
                     var sm = cachedListSummary(id);
                     results.push({
                         id: id,
-                        score: best,
+                        score: score,
                         mrk: mrk,
-                        name: name,
+                        name: idx.name,
                         sub: sub,
-                        type: analysisTypeOf(p),
+                        type: analysisTypeOf(projectById(id)),
                         nodes: sm.nodes,
                         actions: sm.actions,
                         done: sm.done,
@@ -7210,73 +7376,75 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 });
                 return { results: results, total: projects.order.length - 1 };
             }
-            function renderList() {
-                var q = (listSearch.value || "").trim();
-                var data = listAnalyses(q);
+            // HTML for a single list row (shared by the List tab and the Ctrl+P
+            // quick-open overlay).
+            function listItemHtml(r, q) {
+                var highlight = function (s) {
+                    return q ? fuzzyHighlight(q, s) : escapeHtml(s);
+                };
+                var tcls =
+                    r.type === "abc"
+                        ? "t-ab"
+                        : r.type === "tool"
+                          ? "t-tool"
+                          : "";
+                var tlabel =
+                    r.type === "abc" ? "ABC" : r.type === "tool" ? "TOOL" : "5Y";
+                var allDone = r.actions > 0 && r.done === r.actions;
+                return (
+                    '<button type="button" class="list-item" data-id="' +
+                    r.id +
+                    '"><span class="list-main"><span class="list-name">' +
+                    highlight(r.name) +
+                    "</span>" +
+                    (r.sub
+                        ? '<span class="list-sub">' + highlight(r.sub) + "</span>"
+                        : "") +
+                    '</span><span class="list-meta"><span class="list-type ' +
+                    tcls +
+                    '">' +
+                    tlabel +
+                    "</span><span>" +
+                    r.nodes +
+                    " nodes</span>" +
+                    (r.actions ? "<span>" + r.actions + " actions</span>" : "") +
+                    (allDone ? '<span class="list-done">\u2713 done</span>' : "") +
+                    "</span></button>"
+                );
+            }
+            // Shared renderer: fill a container with ranked, highlighted rows.
+            // Returns { shown, total } so callers can update counts/labels.
+            function renderListInto(container, query) {
+                var data = listAnalyses(query);
                 var html = "",
                     shown = 0;
                 data.results.forEach(function (r) {
                     if (r.score < 0) return; // unmatched trail at the end
                     shown++;
-                    var labelName = q
-                        ? fuzzyHighlight(q, r.name)
-                        : escapeHtml(r.name);
-                    var labelSub = r.sub
-                        ? q
-                            ? fuzzyHighlight(q, r.sub)
-                            : escapeHtml(r.sub)
-                        : "";
-                    var tcls =
-                        r.type === "abc"
-                            ? "t-ab"
-                            : r.type === "tool"
-                              ? "t-tool"
-                              : "";
-                    var tlabel =
-                        r.type === "abc" ? "ABC" : r.type === "tool" ? "TOOL" : "5Y";
-                    var allDone =
-                        r.actions > 0 && r.done === r.actions;
-                    html +=
-                        '<button type="button" class="list-item" data-id="' +
-                        r.id +
-                        '"><span class="list-main"><span class="list-name">' +
-                        labelName +
-                        "</span>" +
-                        (labelSub
-                            ? '<span class="list-sub">' + labelSub + "</span>"
-                            : "") +
-                        "</span><span class=\"list-meta\"><span class=\"list-type " +
-                        tcls +
-                        '">' +
-                        tlabel +
-                        "</span><span>" +
-                        r.nodes +
-                        " nodes</span>" +
-                        (r.actions
-                            ? "<span>" + r.actions + " actions</span>"
-                            : "") +
-                        (allDone
-                            ? '<span class="list-done">✓ done</span>'
-                            : "") +
-                        "</span></button>";
+                    html += listItemHtml(r, query);
                 });
                 if (!shown) {
-                    html = q
+                    html = query
                         ? '<div class="list-empty">No analyses match <strong>' +
-                          escapeHtml(q) +
+                          escapeHtml(query) +
                           "</strong>.</div>"
                         : '<div class="list-empty">No analyses yet. Create one with <strong>+ New</strong>.</div>';
                 }
-                listBody.innerHTML = html;
-                listCount.textContent = q
-                    ? shown + " / " + data.total + " analyses"
-                    : data.total + " analyses";
+                container.innerHTML = html;
                 if (mode === "analysis" && currentId) {
-                    var cur = listBody.querySelector(
+                    var cur = container.querySelector(
                         '.list-item[data-id="' + currentId + '"]',
                     );
                     if (cur) cur.classList.add("active");
                 }
+                return { shown: shown, total: data.total };
+            }
+            function renderList() {
+                var q = (listSearch.value || "").trim();
+                var r = renderListInto(listBody, q);
+                listCount.textContent = q
+                    ? r.shown + " / " + r.total + " analyses"
+                    : r.total + " analyses";
             }
             // Clicking an analysis opens it in the normal editor.
             function setupList() {
@@ -7341,6 +7509,131 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     actionPanel.classList.remove("active");
                     aboutPanel.classList.remove("active");
                 }
+            }
+
+            /* ---- Ctrl+P quick-open overlay (reuses the fuzzy list) ---- */
+            var quickOverlay = document.getElementById("quickOverlay");
+            var quickInput = document.getElementById("quickInput");
+            var quickBody = document.getElementById("quickBody");
+            var quickCount = document.getElementById("quickCount");
+            var quickIndex = -1;
+            function quickItems() {
+                return quickBody.querySelectorAll(".list-item");
+            }
+            function updateQuickSelection() {
+                var items = quickItems();
+                for (var i = 0; i < items.length; i++)
+                    items[i].classList.toggle("selected", i === quickIndex);
+                if (quickIndex >= 0 && items[quickIndex])
+                    items[quickIndex].scrollIntoView({ block: "nearest" });
+            }
+            function quickRender() {
+                var q = (quickInput.value || "").trim();
+                var r = renderListInto(quickBody, q);
+                quickCount.textContent = q
+                    ? r.shown + " / " + r.total + " analyses"
+                    : r.total + " analyses";
+                quickIndex = -1;
+                updateQuickSelection();
+            }
+            function openQuickOpen() {
+                quickInput.value = "";
+                quickRender();
+                quickOverlay.hidden = false;
+                quickInput.focus();
+            }
+            function closeQuickOpen() {
+                quickOverlay.hidden = true;
+            }
+            function quickOpenSelected() {
+                var items = quickItems();
+                var id = null;
+                if (quickIndex >= 0 && items[quickIndex])
+                    id = items[quickIndex].getAttribute("data-id");
+                else if (items.length)
+                    id = items[0].getAttribute("data-id");
+                if (id) openAnalysis(id);
+                closeQuickOpen();
+            }
+            function setupQuickOpen() {
+                document.addEventListener("keydown", function (e) {
+                    // Ctrl/Cmd+P (and Cmd+K on mac) opens quick open.
+                    if (
+                        (e.ctrlKey || e.metaKey) &&
+                        (e.key === "p" || e.key === "P" || e.key === "k" || e.key === "K")
+                    ) {
+                        e.preventDefault();
+                        closeMore();
+                        closeModal();
+                        closeNewModal();
+                        openQuickOpen();
+                    } else if (e.key === "Escape" && !quickOverlay.hidden) {
+                        e.preventDefault();
+                        closeQuickOpen();
+                    }
+                });
+                quickInput.addEventListener("input", quickRender);
+                quickInput.addEventListener("keydown", function (e) {
+                    var items = quickItems();
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        quickOpenSelected();
+                    } else if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        quickIndex = Math.min(quickIndex + 1, items.length - 1);
+                        updateQuickSelection();
+                    } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        quickIndex = Math.max(quickIndex - 1, -1);
+                        updateQuickSelection();
+                    }
+                });
+                quickBody.addEventListener("click", function (e) {
+                    var el =
+                        e.target && e.target.closest
+                            ? e.target.closest(".list-item")
+                            : null;
+                    if (!el) return;
+                    openAnalysis(el.getAttribute("data-id"));
+                    closeQuickOpen();
+                });
+                quickOverlay.addEventListener("click", function (e) {
+                    if (e.target === quickOverlay) closeQuickOpen();
+                });
+            }
+
+            /* ---- Shareable deep links (URL hash) ---- */
+            // Keep the current view in the URL: "#map" or "#a=<project id>".
+            function emitHash() {
+                var h = "";
+                if (mode === "map") h = "#map";
+                else if (mode === "analysis" && currentId && currentId !== projects.mapId)
+                    h = "#a=" + encodeURIComponent(currentId);
+                try {
+                    if (h !== location.hash)
+                        history.replaceState(null, "", h || location.pathname + location.search);
+                } catch (e) {}
+            }
+            // Follow a hash on load: open the referenced analysis or the map.
+            function applyHash() {
+                try {
+                    var h = decodeURIComponent(location.hash || "").toLowerCase();
+                    if (!h) return;
+                    if (h === "#map") {
+                        showMap();
+                        return;
+                    }
+                    var m = h.match(/^#a=([\s\S]+)$/);
+                    if (m) {
+                        var target = m[1];
+                        // Prefer an exact id match, else a name match.
+                        var id = null;
+                        if (projects.items[target] && target !== projects.mapId)
+                            id = target;
+                        else id = resolveLink(target);
+                        if (id) openAnalysis(id, false);
+                    }
+                } catch (e) {}
             }
 
             function renderActions() {
@@ -8122,6 +8415,9 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             loadIntoEditor(projectById(projects.mapId), true);
             updateChrome();
             render();
+            // A #a=<id> / #map hash (shared deep link) overrides the default
+            // "start on map" view.
+            applyHash();
 
             // In #live mode, swap to the read-only mirror chrome and ask the
             // editing window for the current state.
@@ -8135,6 +8431,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 switchTab("list");
             };
             setupList();
+            setupQuickOpen();
             document.getElementById("projNew").onclick = newAnalysisFlow;
             document.getElementById("projRename").onclick = renameCurrent;
             document.getElementById("projDup").onclick = duplicateCurrent;
@@ -8190,6 +8487,23 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             document.getElementById("mImport").onclick = function () {
                 closeMore();
                 document.getElementById("importFile").click();
+            };
+            document.getElementById("mCopyLink").onclick = function () {
+                closeMore();
+                emitHash(); // ensure the shareable hash is up to date
+                var url = location.href;
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(url).then(
+                        function () {
+                            showToast("Link copied to clipboard");
+                        },
+                        function () {
+                            showToast("Link: " + url);
+                        },
+                    );
+                } else {
+                    showToast("Link: " + url);
+                }
             };
             document.getElementById("importFile").onchange = function (e) {
                 var f = e.target.files && e.target.files[0];
