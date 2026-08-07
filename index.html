@@ -85,9 +85,10 @@
                 flex-shrink: 0;
             }
             #left.hidden {
-                margin-left: -46%;
                 width: 0;
                 overflow: hidden;
+                border-right-color: transparent;
+                margin-left: 0;
             }
             #toggle {
                 position: absolute;
@@ -7485,8 +7486,17 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             // We remember the panel's prior visibility so leaving the List tab
             // restores it instead of clobbering the user's Hide/Show toggle.
             var listLeftWasHidden = null;
+            // The List tab is a full-focus browser: it must take over the whole
+            // right pane. We hide the diagram chrome (#canvasWrap/#stage, the
+            // button bar, legend and how-to info) exactly like the Actions and
+            // About tabs do — otherwise the selected analysis tree still renders
+            // on top and squeezes the searchable list out past the screen edge.
             function applyListMode(on) {
                 var left = document.getElementById("left");
+                var wrap = document.getElementById("canvasWrap");
+                var btns = document.getElementById("btns");
+                var legend = document.getElementById("legendPanel");
+                var info = document.getElementById("info");
                 if (on) {
                     if (listLeftWasHidden === null)
                         listLeftWasHidden = left.classList.contains("hidden");
@@ -7497,6 +7507,11 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     listPanel.classList.add("active");
                     actionPanel.classList.remove("active");
                     aboutPanel.classList.remove("active");
+                    // Full-focus: hide the diagram + chrome.
+                    wrap.style.display = "none";
+                    btns.style.display = "none";
+                    legend.style.display = "none";
+                    info.style.display = "none";
                 } else {
                     if (listLeftWasHidden !== null) {
                         left.classList.toggle("hidden", listLeftWasHidden);
@@ -7508,6 +7523,12 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     listPanel.classList.remove("active");
                     actionPanel.classList.remove("active");
                     aboutPanel.classList.remove("active");
+                    // Restore the diagram chrome; render() re-establishes the
+                    // exact values for the tab being entered.
+                    wrap.style.display = "block";
+                    btns.style.display = "flex";
+                    legend.style.display = "block";
+                    info.style.display = "block";
                 }
             }
 
