@@ -90,25 +90,57 @@
                 border-right-color: transparent;
                 margin-left: 0;
             }
+            /* Draggable divider between the editor (#left) and diagram (#right). */
+            #splitter {
+                flex: 0 0 5px;
+                width: 5px;
+                cursor: col-resize;
+                background: #252526;
+                border-right: 1px solid #3e3e42;
+                position: relative;
+                z-index: 40;
+                user-select: none;
+                touch-action: none;
+            }
+            #splitter:hover,
+            #splitter.dragging {
+                background: #569cd6;
+            }
+            body.lm #splitter {
+                background: #f3f3f3;
+                border-right-color: #ccc;
+            }
             #toggle {
                 position: absolute;
                 top: 10px;
                 right: 10px;
                 z-index: 101;
-                padding: 6px 12px;
+                width: 26px;
+                height: 26px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 0;
                 background: #0e639c;
                 color: #fff;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
                 cursor: pointer;
-                font-size: 12px;
-                font-weight: 500;
+                font-size: 14px;
+                font-weight: 600;
+                line-height: 1;
             }
             #left.hidden #toggle {
+                /* Collapsed: a small centered round handle on the far edge so
+                   it floats over no editor content and nothing else. */
                 position: fixed;
-                left: 10px;
-                top: 52px;
+                left: 6px;
+                top: 50%;
+                transform: translateY(-50%);
                 right: auto;
+                border-radius: 50%;
+                background: rgba(14, 99, 156, 0.9);
+                box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
             }
             #copyText {
                 position: absolute;
@@ -1895,6 +1927,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         </span>
                     </div>
                 </div>
+                <div
+                    id="splitter"
+                    title="Drag to resize the editor"
+                ></div>
                 <div id="right">
                     <div id="btns">
                         <button id="viewTree" class="btn activeView">
@@ -2414,6 +2450,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 saveToStorage(); // persist whatever we're leaving
                 mode = "map";
                 currentId = null;
+                activeView = "tree"; // the map is always drawn as a tree
                 if (activeTab === "about") {
                     /* keep about */
                 } else activeTab = "5y";
@@ -6135,19 +6172,21 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             function nodeDims(n) {
                 var chars = Math.max(10, Math.min(38, n.text.length));
                 var w = Math.max(100, Math.min(280, chars * 7.2 + 22));
-                // Wrap from the UNRESERVED width first.
+                // Wrap from the full width (the old top-right chip that
+                // reserved right room is gone — the linked type is now a pill
+                // rendered below the label instead).
                 var lines = wrapText(n.text, Math.floor((w - 14) / 7.2));
-                // Map link nodes carry a top-right chip; reserve room on the
-                // right so the centred label never slides under it. The label
-                // is then centred within (w - reserve) — see drawNode.
-                var reserve = mode === "map" && n._link ? 38 : 0;
-                w += reserve;
-                var pillRows = n.tags.length ? Math.ceil(n.tags.length / 2) : 0;
+                // Map link nodes show their linked diagram-type as a colored
+                // pill under the label (see drawNode) — count that as one row.
+                var isLinkPill = mode === "map" && n._link ? 1 : 0;
+                var pillRows =
+                    (n.tags.length ? Math.ceil(n.tags.length / 2) : 0) +
+                    isLinkPill;
                 var h =
                     2 +
                     lines.length * 16 +
                     (pillRows > 0 ? 6 + pillRows * 20 + 6 : 8);
-                return { w: w, h: h, lines: lines, reserve: reserve };
+                return { w: w, h: h, lines: lines, reserve: 0 };
             }
             function wrapText(text, maxChars) {
                 var words = String(text).split(/\s+/);
@@ -6474,24 +6513,23 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         stroke +
                         '" rx="8" ry="8"/>';
 
-                // Detail-link badge: chevron = 5-Why, "ABC" tag = ABC analysis;
-                // broken links get a dim dashed mark instead.
-                // Detail-link badge: a compact chip pinned to the card's
-                // TOP-right corner so it never collides with the bottom-right
-                // line number (the old badge shared that corner). Chevron =
-                // 5-Why link, "ABC" = ABC analysis, dashed dash = broken link.
-                // Geometry + fills are inline so the chip survives SVG/PNG
-                // export and is unaffected by theme CSS.
-                var actionDotCx = n._w - 8;
+                // Map link nodes: derive their linked diagram-type so it can be
+                // drawn as a colored pill under the label (same style as #tags).
+                // Chevron = 5-Why link, "ABC" = ABC analysis, "TL"/"2×2"/etc =
+                // tool analyses, dashed dash = broken link. Geometry + fills
+                // are inline so the pill survives SVG/PNG export unchanged.
+                // Previously this was a cramped chip pinned to the top-right
+                // corner where it collided with the line number.
+                var typePill = null;
                 if (isLink) {
                     var TOOL_CHIPS = {
-                        abc: { txt: "ABC", col: "#c586c0", w: 30 },
-                        timeline: { txt: "TL", col: "#569cd6", w: 24 },
-                        grid: { txt: "2\u00d72", col: "#5ba84a", w: 28 },
-                        matrix: { txt: "RM", col: "#d07b2e", w: 26 },
-                        bowtie: { txt: "BT", col: "#b23b3b", w: 24 },
-                        tripod: { txt: "TRI", col: "#8a63c9", w: 28 },
-                        controls: { txt: "HoC", col: "#c9a227", w: 30 },
+                        abc: { txt: "ABC", col: "#c586c0" },
+                        timeline: { txt: "TL", col: "#569cd6" },
+                        grid: { txt: "2\u00d72", col: "#5ba84a" },
+                        matrix: { txt: "RM", col: "#d07b2e" },
+                        bowtie: { txt: "BT", col: "#b23b3b" },
+                        tripod: { txt: "TRI", col: "#8a63c9" },
+                        controls: { txt: "HoC", col: "#c9a227" },
                     };
                     var linkKind = null;
                     if (linkId && projectById(linkId)) {
@@ -6502,64 +6540,29 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                                 : detectTool(lp.text || "");
                     }
                     var chipDef = linkKind ? TOOL_CHIPS[linkKind] : null;
-                    var chipCol = brokenLink
-                        ? "#b04848"
-                        : chipDef
-                          ? chipDef.col
-                          : "#4ec9b0";
-                    var chipTxt = brokenLink
-                        ? "\u2014"
-                        : chipDef
-                          ? chipDef.txt
-                          : "\u276F";
-                    var chipW = brokenLink ? 18 : chipDef ? chipDef.w : 18;
-                    var chipH = 16;
-                    var chipX = n._w - 6 - chipW;
-                    var chipY = 6;
-                    var chipFill = lightly(chipCol, 0.2, 0.16);
-                    s +=
-                        '<g class="node-link-chip">' +
-                        '<rect x="' +
-                        chipX +
-                        '" y="' +
-                        chipY +
-                        '" width="' +
-                        chipW +
-                        '" height="' +
-                        chipH +
-                        '" rx="7" ry="7" fill="' +
-                        chipFill +
-                        '" stroke="' +
-                        chipCol +
-                        '" stroke-width="1"' +
-                        (brokenLink ? ' stroke-dasharray="3 2"' : "") +
-                        "/>" +
-                        '<text class="node-chip-txt" x="' +
-                        (chipX + chipW / 2) +
-                        '" y="' +
-                        (chipY + chipH - 4.5) +
-                        '" text-anchor="middle" fill="' +
-                        chipCol +
-                        '" font-size="' +
-                        (chipDef && chipTxt.length > 2 ? "9.5" : "11") +
-                        'px">' +
-                        chipTxt +
-                        "</text></g>";
-                    // If this node also carries an action, tuck its dot just
-                    // left of the chip so the two don't stack.
-                    actionDotCx = chipX - 6;
+                    typePill = {
+                        txt: brokenLink
+                            ? "\u2014"
+                            : chipDef
+                              ? chipDef.txt
+                              : "\u276F",
+                        col: brokenLink
+                            ? "#b04848"
+                            : chipDef
+                              ? chipDef.col
+                              : "#4ec9b0",
+                    };
                 }
 
                 // Action indicator: red dot top-right (analyses only).
                 if (hasAction) {
                     s +=
                         '<circle class="node-action-dot" cx="' +
-                        actionDotCx +
+                        (n._w - 8) +
                         '" cy="8" r="4" fill="#d50000"/>';
                 }
 
-                // Text lines. Centre within the unreserved area so link-node
-                // labels stay clear of the top-right chip.
+                // Text lines, centred across the full node width.
                 var textCx = (n._w - (n._reserve || 0)) / 2;
                 var ty = 14;
                 n._lines.forEach(function (line) {
@@ -6574,10 +6577,36 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     ty += 16;
                 });
 
+                // Linked-diagram type pill (map link nodes) — its own row under
+                // the label, styled like the #tag pills.
+                if (typePill) {
+                    var tpw = 18 + typePill.txt.length * 6.6;
+                    var tpx = (n._w - (n._reserve || 0)) / 2 - tpw / 2;
+                    var tpy = 4 + n._lines.length * 16 + 6;
+                    s +=
+                        '<g class="pill" transform="translate(' +
+                        tpx +
+                        "," +
+                        tpy +
+                        ')"><rect width="' +
+                        tpw +
+                        '" height="17" rx="9" ry="9" fill="' +
+                        typePill.col +
+                        '"/><text x="' +
+                        tpw / 2 +
+                        '" y="12" text-anchor="middle">' +
+                        svgText(typePill.txt) +
+                        "</text></g>";
+                }
+
                 // Tag pills
                 if (n.tags.length) {
                     var x = 12,
-                        y = 4 + n._lines.length * 16 + 6;
+                        y =
+                            4 +
+                            n._lines.length * 16 +
+                            6 +
+                            (typePill ? 20 : 0);
                     n.tags.forEach(function (tag, i) {
                         var tinfo = null;
                         if (model)
@@ -7491,6 +7520,31 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             // button bar, legend and how-to info) exactly like the Actions and
             // About tabs do — otherwise the selected analysis tree still renders
             // on top and squeezes the searchable list out past the screen edge.
+            // The width of the editor is managed inline (so the splitter and a
+            // "hidden" state can share one source of truth); setLeftVisible
+            // collapses/expands it without fighting the resizer's width.
+            var savedLeftW = null; // last "visible" editor width
+            function leftVisible() {
+                return !document
+                    .getElementById("left")
+                    .classList.contains("hidden");
+            }
+            function setLeftVisible(visible) {
+                var left = document.getElementById("left");
+                var t = document.getElementById("toggle");
+                if (visible) {
+                    left.classList.remove("hidden");
+                    left.style.width = savedLeftW || "";
+                    t.textContent = "\u00AB"; // « collapse icon
+                    t.title = "Hide editor";
+                } else {
+                    if (savedLeftW === null) savedLeftW = left.style.width || "";
+                    left.classList.add("hidden");
+                    left.style.width = "0px";
+                    t.textContent = "\u00BB"; // » expand icon
+                    t.title = "Show editor";
+                }
+            }
             function applyListMode(on) {
                 var left = document.getElementById("left");
                 var wrap = document.getElementById("canvasWrap");
@@ -7500,10 +7554,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 if (on) {
                     if (listLeftWasHidden === null)
                         listLeftWasHidden = left.classList.contains("hidden");
-                    if (!left.classList.contains("hidden")) {
-                        left.classList.add("hidden");
-                        document.getElementById("toggle").textContent = "Show";
-                    }
+                    setLeftVisible(false);
                     listPanel.classList.add("active");
                     actionPanel.classList.remove("active");
                     aboutPanel.classList.remove("active");
@@ -7514,10 +7565,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     info.style.display = "none";
                 } else {
                     if (listLeftWasHidden !== null) {
-                        left.classList.toggle("hidden", listLeftWasHidden);
-                        document.getElementById("toggle").textContent = listLeftWasHidden
-                            ? "Show"
-                            : "Hide";
+                        setLeftVisible(!listLeftWasHidden);
                         listLeftWasHidden = null;
                     }
                     listPanel.classList.remove("active");
@@ -7866,12 +7914,22 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 actionPanel.classList.remove("active");
                 aboutPanel.classList.remove("active");
 
+                // In map mode the Fishbone toggle is meaningless (the map is
+                // always a tree) — hide it and keep the tree button active.
+                var btnTree = document.getElementById("viewTree"),
+                    btnFish = document.getElementById("viewFish");
+                btnFish.style.display = mode === "map" ? "none" : "";
+                btnTree.style.display = "";
+                btnTree.classList.toggle("activeView", activeView === "tree");
+                btnFish.classList.toggle("activeView", activeView === "fish");
+
                 // First-line keyword routes to a text-first tool renderer
                 // (Timeline:/Grid:/Matrix:/Bowtie:/Controls:) regardless of
                 // the tree/fishbone toggle. The map always uses the tree.
                 var tool =
                     mode === "analysis" ? detectTool(getEditorText()) : null;
-                if (tool) {
+                if (mode === "map") renderTree();
+                else if (tool) {
                     // A renderer exception must never leave the PREVIOUS
                     // diagram (often the map) silently on the canvas.
                     try {
@@ -9109,11 +9167,56 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 setTimeout(broadcastLiveState, 600);
             };
             document.getElementById("toggle").onclick = function (e) {
-                var left = document.getElementById("left");
-                var hidden = left.classList.toggle("hidden");
-                e.currentTarget.textContent = hidden ? "Show" : "Hide";
+                setLeftVisible(!leftVisible());
                 setTimeout(fitView, 310);
             };
+
+            /* ---- Draggable editor/diagram divider ---- */
+            (function setupSplitter() {
+                var splitter = document.getElementById("splitter");
+                var left = document.getElementById("left");
+                var main = document.getElementById("main");
+                var dragging = false;
+                function onMove(e) {
+                    if (!dragging) return;
+                    var mr = main.getBoundingClientRect();
+                    var w = e.clientX - mr.left - splitter.offsetWidth / 2;
+                    w = Math.max(180, Math.min(w, mr.width - 260));
+                    left.style.width = w + "px";
+                    savedLeftW = w + "px";
+                    try {
+                        localStorage.setItem("ehs5y_splitw", String(w));
+                    } catch (err) {}
+                }
+                function onUp() {
+                    if (!dragging) return;
+                    dragging = false;
+                    splitter.classList.remove("dragging");
+                    document.body.style.cursor = "";
+                    left.style.transition = "";
+                    document.removeEventListener("mousemove", onMove);
+                    document.removeEventListener("mouseup", onUp);
+                    fitView();
+                }
+                splitter.addEventListener("mousedown", function (e) {
+                    e.preventDefault();
+                    dragging = true;
+                    splitter.classList.add("dragging");
+                    document.body.style.cursor = "col-resize";
+                    document.body.style.userSelect = "none";
+                    left.style.transition = "none";
+                    document.addEventListener("mousemove", onMove);
+                    document.addEventListener("mouseup", onUp);
+                });
+                var saved = null;
+                try {
+                    saved = parseInt(localStorage.getItem("ehs5y_splitw"), 10);
+                } catch (err) {}
+                if (saved && saved > 120) {
+                    left.style.width = saved + "px";
+                    savedLeftW = saved + "px";
+                }
+            })();
 
             /* ---- Pan & zoom ---- */
             wrap.addEventListener(
