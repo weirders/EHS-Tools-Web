@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>EHS Visual Tools V40 - EHS Analysis Suite</title>
+        <title>EHS Visual Tools V41 - EHS Analysis Suite</title>
         <style>
             * {
                 margin: 0;
@@ -1499,6 +1499,45 @@
             body.lm {
                 background: #fff;
                 color: #333;
+                --sfha-panel: #fff;
+                --sfha-panel2: #f3f3f3;
+                --sfha-text: #333;
+                --sfha-border: #ccc;
+            }
+            .sync-dot {
+                display: inline-block;
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                margin-right: 6px;
+                background: #777;
+                vertical-align: middle;
+            }
+            .sync-dot.on {
+                background: #3fb950;
+            }
+            .sync-dot.ready {
+                background: #d29922;
+            }
+            .sync-dot.err {
+                background: #f85149;
+            }
+            #syncBlocked {
+                position: fixed;
+                inset: 0;
+                z-index: 99998;
+                background: rgba(0, 0, 0, 0.8);
+                color: #eee;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 24px;
+                text-align: center;
+                font-size: 15px;
+                line-height: 1.5;
+            }
+            #syncBlocked div {
+                max-width: 460px;
             }
             body.lm #left {
                 background: #f3f3f3;
@@ -1961,6 +2000,13 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         >
                             🖥 Live
                         </button>
+                        <button
+                            id="syncBtn"
+                            class="btn sec"
+                            title="Sync with your other devices and contacts"
+                        >
+                            <span id="syncDot" class="sync-dot"></span>⇄ Sync
+                        </button>
                     </div>
                     <div id="canvasWrap"><div id="stage"></div></div>
                     <div id="actionPanel"></div>
@@ -2037,7 +2083,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                             </li>
                         </ul>
                         <p class="copyright">
-                            EHS Visual Tools V40 &mdash; EHS Analysis Suite
+                            EHS Visual Tools V41 &mdash; EHS Analysis Suite
                             &middot; &copy; J. Overdevest
                         </p>
                     </div>
@@ -2226,6 +2272,8 @@ Burnt product on line 3 @red #Machine \Investigate root cause
 
             /* ---- Storage / model ---- */
             function uid() {
+                // Record ids are keys in the shared sfha-sync DB -> real UUIDs.
+                if (window.SfhaSync && SfhaSync.util) return SfhaSync.util.uid();
                 return (
                     "p" +
                     Date.now().toString(36) +
@@ -2241,9 +2289,17 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             function saveProjects() {
                 if (LIVE) return; // mirror window must never write storage
                 try {
+                    // Per-device UI preference: stays in localStorage.
+                    localStorage.setItem("ehs5y_lightMode", String(lightMode));
+                } catch (e) {}
+                if (storeMode === "sync") {
+                    scheduleFlush();
+                    return;
+                }
+                if (storeMode !== "legacy") return; // pending / blocked
+                try {
                     localStorage.setItem(PKEY, JSON.stringify(projects));
                     localStorage.setItem("ehs5y_schema", "V40");
-                    localStorage.setItem("ehs5y_lightMode", String(lightMode));
                 } catch (e) {}
             }
             // Project whose content is in the editor right now.
@@ -2376,7 +2432,11 @@ Burnt product on line 3 @red #Machine \Investigate root cause
 
                 return { mapId: mapId, order: order, items: items };
             }
-            function loadProjects() {
+            // Legacy (pre-V41) localStorage store. Read once for the migration
+            // into sfha-sync; stays the working store only when the sync layer
+            // has never been available on this device ("legacy" mode).
+            function loadLegacyProjects() {
+                projects = null; // drop the boot placeholder
                 try {
                     var raw = localStorage.getItem(PKEY);
                     if (raw) projects = JSON.parse(raw);
@@ -2393,12 +2453,525 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     !projects.items[projects.mapId]
                 ) {
                     projects = buildInitialProjects();
-                    saveProjects();
+                    try {
+                        localStorage.setItem(PKEY, JSON.stringify(projects));
+                        localStorage.setItem("ehs5y_schema", "V40");
+                    } catch (e) {}
                 }
                 projects.order.forEach(function (pid) {
                     if (projects.items[pid] && !projects.items[pid].done)
                         projects.items[pid].done = {};
                 });
+            }
+            // In sync mode `projects` is kept fresh by SfhaSync.onChange, so
+            // callers that used to re-read storage (live mirror) need nothing.
+            function loadProjects() {
+                if (storeMode === "legacy") loadLegacyProjects();
+            }
+
+            /* ---- sfha-sync store (V41) ----
+               Every project (the map included) is ONE record in the shared
+               sfha-sync DB: app "ehstools", coll "projects", payload
+               { name, type, text, dir, done, created, isMap? }. The DB is the
+               single source of truth. `projects` is only the in-memory working
+               view the (synchronous) app code edits; saveProjects() diffs it
+               against `stored` and writes the changed records, and onChange
+               re-reads the DB into it. Nothing else is persisted.
+               - The map is a singleton with the fixed id MAP_ID so all devices
+                 converge on one map (last write wins, like every record).
+               - List order is derived from payload.created (no order record
+                 that could lose entries in a merge).
+               - Theme / split width are per-device prefs -> localStorage.   */
+            var SYNC_URL = "https://weirders.github.io/ToolDeck/sync.v1.js";
+            var SYNC_APP = "ehstools";
+            var SYNC_COLL = "projects";
+            var MAP_ID = "ehstools-map";
+            var EXAMPLE_ID = "ehstools-example";
+            var DAY_MS = 86400000;
+            // Seeds lose against everything; migrated data beats seeds but
+            // loses against any real edit made on another device.
+            var STAMP_SEED = new Date(0).toISOString();
+            var STAMP_MIGRATED = new Date(DAY_MS).toISOString();
+            var storeMode = "pending"; // pending | sync | legacy | blocked
+            var stored = {}; // id -> canonical payload JSON last read/written
+            var flushTimer = null;
+            var flushChain = Promise.resolve();
+            var pullChain = Promise.resolve();
+            var linkQueue = [];
+            var linkTimer = null;
+
+            function payloadOf(p) {
+                var o = {
+                    name: p.name || "Untitled",
+                    type: p.type === "abc" ? "abc" : "5why",
+                    text: p.text || "",
+                    dir: p.dir || "LR",
+                    done: p.done && typeof p.done === "object" ? p.done : {},
+                    created: p.created || "",
+                };
+                if (p.isMap) o.isMap = true;
+                return o;
+            }
+            function canon(p) {
+                return JSON.stringify(payloadOf(p));
+            }
+            function placeholderProjects(text) {
+                var items = {};
+                items[MAP_ID] = {
+                    name: "Map",
+                    text: text,
+                    dir: "LR",
+                    done: {},
+                    isMap: true,
+                };
+                return { mapId: MAP_ID, order: [MAP_ID], items: items };
+            }
+            // Map first, then by creation time (id as tie-break).
+            function rebuildOrder() {
+                var now = new Date().toISOString();
+                var ids = Object.keys(projects.items).filter(function (id) {
+                    if (!projects.items[id].created && id !== MAP_ID)
+                        projects.items[id].created = now;
+                    return id !== MAP_ID;
+                });
+                ids.sort(function (a, b) {
+                    var ca = projects.items[a].created,
+                        cb = projects.items[b].created;
+                    return ca < cb ? -1 : ca > cb ? 1 : a < b ? -1 : 1;
+                });
+                projects.order = [MAP_ID].concat(ids);
+            }
+
+            // -- write path: diff `projects` against `stored`, put / tombstone.
+            function scheduleFlush() {
+                clearTimeout(flushTimer);
+                flushTimer = setTimeout(flushNow, 400);
+            }
+            function flushNow() {
+                clearTimeout(flushTimer);
+                if (storeMode !== "sync" || LIVE || !projects) return flushChain;
+                var ops = [];
+                var now = new Date().toISOString();
+                Object.keys(projects.items).forEach(function (id) {
+                    var p = projects.items[id];
+                    if (!p.created && id !== MAP_ID) p.created = now;
+                    var j = canon(p);
+                    if (stored[id] === j) return;
+                    stored[id] = j;
+                    ops.push(function () {
+                        return SfhaSync.put(SYNC_APP, SYNC_COLL, {
+                            id: id,
+                            payload: JSON.parse(j),
+                        });
+                    });
+                });
+                Object.keys(stored).forEach(function (id) {
+                    if (projects.items[id]) return;
+                    delete stored[id];
+                    ops.push(function () {
+                        return SfhaSync.del(SYNC_APP, SYNC_COLL, id);
+                    });
+                });
+                ops.forEach(function (op) {
+                    flushChain = flushChain.then(op).catch(function (e) {
+                        console.error("sfha-sync write failed", e);
+                        showToast("Couldn\u2019t save to the sync store", true);
+                    });
+                });
+                return flushChain;
+            }
+
+            // -- read path: re-read the DB after any change (own window, other
+            // tab, or a remote merge) and fold differences into `projects`.
+            function pullFromDb() {
+                pullChain = pullChain.then(doPull).catch(function (e) {
+                    console.error("sfha-sync read failed", e);
+                });
+                return pullChain;
+            }
+            function doPull() {
+                if (storeMode !== "sync") return;
+                return SfhaSync.list(SYNC_APP, SYNC_COLL, {
+                    includeDeleted: true,
+                }).then(applyRecords);
+            }
+            function applyRecords(recs) {
+                if (!LIVE) saveToStorage(); // capture the editor before comparing
+                var editId = mode === "map" ? MAP_ID : currentId;
+                var touched = false,
+                    reloadEditor = false,
+                    leftCurrent = false;
+                recs.forEach(function (r) {
+                    var id = r.id;
+                    var have = projects.items[id];
+                    var known = Object.prototype.hasOwnProperty.call(stored, id);
+                    // Unflushed local work wins: it is the later write and
+                    // goes out with a newer stamp on the next flush.
+                    if (known && !have) return; // local delete pending
+                    if (have && (!known || canon(have) !== stored[id])) return;
+                    if (r.deleted) {
+                        if (!have || id === MAP_ID) return;
+                        delete projects.items[id];
+                        delete stored[id];
+                        touched = true;
+                        if (id === currentId) leftCurrent = true;
+                        return;
+                    }
+                    var j = canon(r.payload || {});
+                    if (known && stored[id] === j) return;
+                    projects.items[id] = JSON.parse(j);
+                    stored[id] = j;
+                    touched = true;
+                    if (!have && id !== MAP_ID) linkQueue.push(id);
+                    if (id === editId) reloadEditor = true;
+                });
+                if (!touched) return;
+                rebuildOrder();
+                if (LIVE) {
+                    render(); // text comes from the editor window's broadcast
+                    return;
+                }
+                if (leftCurrent) {
+                    showToast("This analysis was deleted on another device");
+                    showMap();
+                } else {
+                    if (reloadEditor) {
+                        loadIntoEditor(projects.items[editId], false);
+                        pushUndo();
+                    }
+                    updateChrome();
+                    render();
+                }
+                scheduleLinkCheck();
+            }
+
+            // Analyses that arrived from elsewhere but aren't on the map (the
+            // other device's map lost the merge, or was never synced) get a
+            // link, so nothing is reachable only through the List tab. Delayed
+            // so a newer remote map in the same sync run lands first.
+            function isLinkedInMap(id) {
+                var hit = false;
+                try {
+                    parseInput(projects.items[MAP_ID].text).nodes.forEach(
+                        function (n) {
+                            if (n._link && resolveLink(n._link) === id)
+                                hit = true;
+                        },
+                    );
+                } catch (e) {
+                    hit = true; // can't tell -> leave the map alone
+                }
+                return hit;
+            }
+            function scheduleLinkCheck() {
+                if (LIVE || !linkQueue.length) return;
+                clearTimeout(linkTimer);
+                linkTimer = setTimeout(function () {
+                    if (storeMode !== "sync") return;
+                    saveToStorage();
+                    var ids = linkQueue;
+                    linkQueue = [];
+                    var n = 0;
+                    ids.forEach(function (id) {
+                        var p = projects.items[id];
+                        if (!p || isLinkedInMap(id)) return;
+                        appendLinkToMap(p.name);
+                        n++;
+                    });
+                    if (!n) return;
+                    if (mode === "map") {
+                        loadIntoEditor(projects.items[MAP_ID], false);
+                        pushUndo();
+                        render();
+                    }
+                    showToast(
+                        "Added " + n + " synced anal" +
+                            (n === 1 ? "ysis" : "yses") + " to the map",
+                    );
+                }, 3000);
+            }
+
+            // -- one-time migration of the localStorage store (contract rule:
+            // copy into sfha-sync with an old stamp, then never read it again).
+            function putIfNewer(id, payload, stamp) {
+                return SfhaSync.get(SYNC_APP, SYNC_COLL, id).then(function (ex) {
+                    if (ex && ex.updatedAt >= stamp) return;
+                    return SfhaSync.put(
+                        SYNC_APP,
+                        SYNC_COLL,
+                        { id: id, payload: payload, updatedAt: stamp },
+                        { keepStamp: true, silent: true },
+                    );
+                });
+            }
+            function migrateLegacy() {
+                var hasOld =
+                    localStorage.getItem(PKEY) ||
+                    (localStorage.getItem("ehs5y_editor") || "").trim();
+                var chain = Promise.resolve();
+                if (hasOld) {
+                    loadLegacyProjects();
+                    var legacy = projects;
+                    legacy.order.forEach(function (oldId, i) {
+                        var p = legacy.items[oldId];
+                        if (!p) return;
+                        var id = oldId,
+                            stamp = STAMP_MIGRATED,
+                            created = new Date(DAY_MS + i * 1000).toISOString();
+                        if (oldId === legacy.mapId) {
+                            // All devices share one map. Among never-edited
+                            // migrated maps the fuller one wins the tie.
+                            id = MAP_ID;
+                            stamp = new Date(
+                                DAY_MS +
+                                    Math.min((p.text || "").length, DAY_MS - 1),
+                            ).toISOString();
+                        } else if (
+                            p.text === SEED_TEXT &&
+                            p.name === "Example analysis" &&
+                            !Object.keys(p.done || {}).length
+                        ) {
+                            // Untouched seed: same id everywhere -> no duplicates.
+                            id = EXAMPLE_ID;
+                            stamp = STAMP_SEED;
+                            created = STAMP_SEED;
+                        } else linkQueue.push(id);
+                        var pl = payloadOf(p);
+                        pl.created = id === MAP_ID ? "" : created;
+                        if (id === MAP_ID) pl.isMap = true;
+                        chain = chain.then(function () {
+                            return putIfNewer(id, pl, stamp);
+                        });
+                    });
+                    // Payloads are built; back to the placeholder so nothing
+                    // edits the legacy object while the writes are in flight.
+                    projects = placeholderProjects("Loading\u2026");
+                }
+                return chain.then(function () {
+                    try {
+                        localStorage.setItem("ehs5y_sync_migrated", "1");
+                    } catch (e) {}
+                });
+            }
+            // Fresh install: seed an example + a map, stamped so that anything
+            // real arriving from another device replaces them.
+            function seedIfNeeded(recs) {
+                var chain = Promise.resolve();
+                var live = recs.filter(function (r) {
+                    return !r.deleted;
+                });
+                if (!recs.length) {
+                    var ex = payloadOf({ name: "Example analysis", text: SEED_TEXT });
+                    ex.created = STAMP_SEED;
+                    live.push({ id: EXAMPLE_ID, payload: ex });
+                    chain = chain.then(function () {
+                        return putIfNewer(EXAMPLE_ID, ex, STAMP_SEED);
+                    });
+                }
+                var hasMap = live.some(function (r) {
+                    return r.id === MAP_ID;
+                });
+                if (!hasMap) {
+                    var mp = payloadOf({
+                        name: "Map",
+                        isMap: true,
+                        text:
+                            "Analyses\n" +
+                            live
+                                .map(function (r) {
+                                    return "\t>" + ((r.payload || {}).name || "Untitled");
+                                })
+                                .join("\n"),
+                    });
+                    chain = chain.then(function () {
+                        return SfhaSync.put(
+                            SYNC_APP,
+                            SYNC_COLL,
+                            { id: MAP_ID, payload: mp, updatedAt: STAMP_SEED },
+                            { keepStamp: true, silent: true },
+                        );
+                    });
+                }
+                return chain;
+            }
+
+            // -- loading the shared library. Normal path: the script from
+            // ToolDeck (same origin as the DB). A copy is cached in
+            // localStorage so the tool still opens its data offline.
+            function tryCachedSyncLib() {
+                if (window.SfhaSync) return true;
+                try {
+                    var src = localStorage.getItem("ehs5y_sync_lib");
+                    if (src) (0, eval)(src);
+                } catch (e) {
+                    console.warn("cached sync library failed", e);
+                }
+                return !!window.SfhaSync;
+            }
+            function loadSyncLib() {
+                return new Promise(function (resolve) {
+                    if (window.SfhaSync) return resolve(true);
+                    var settled = false;
+                    function fin(ok) {
+                        if (settled) return;
+                        settled = true;
+                        resolve(ok);
+                    }
+                    var sc = document.createElement("script");
+                    sc.src = SYNC_URL;
+                    sc.onload = function () {
+                        fin(!!window.SfhaSync || tryCachedSyncLib());
+                    };
+                    sc.onerror = function () {
+                        fin(tryCachedSyncLib());
+                    };
+                    document.head.appendChild(sc);
+                    // A black-holed request must not hang the tool forever.
+                    setTimeout(function () {
+                        fin(tryCachedSyncLib());
+                    }, 8000);
+                });
+            }
+            function cacheSyncLib() {
+                try {
+                    fetch(SYNC_URL)
+                        .then(function (r) {
+                            return r.ok ? r.text() : null;
+                        })
+                        .then(function (t) {
+                            if (t && t.indexOf("SfhaSync") !== -1)
+                                localStorage.setItem("ehs5y_sync_lib", t);
+                        })
+                        .catch(function () {});
+                } catch (e) {}
+            }
+
+            function startSyncStore() {
+                return SfhaSync.init({ app: SYNC_APP })
+                    .then(function () {
+                        // The mirror window never writes, so it never migrates.
+                        if (LIVE) return;
+                        return SfhaSync.migrate("v1", migrateLegacy);
+                    })
+                    .then(function () {
+                        return SfhaSync.list(SYNC_APP, SYNC_COLL, {
+                            includeDeleted: true,
+                        });
+                    })
+                    .then(function (recs) {
+                        if (LIVE) return;
+                        return seedIfNeeded(recs);
+                    })
+                    .then(function () {
+                        return SfhaSync.list(SYNC_APP, SYNC_COLL);
+                    })
+                    .then(function (recs) {
+                        projects = placeholderProjects("Analyses");
+                        stored = {};
+                        recs.forEach(function (r) {
+                            var j = canon(r.payload || {});
+                            projects.items[r.id] = JSON.parse(j);
+                            stored[r.id] = j;
+                        });
+                        projects.items[MAP_ID].isMap = true;
+                        rebuildOrder();
+                        storeMode = "sync";
+                        SfhaSync.onChange(function (ev) {
+                            if (ev.app === SYNC_APP && ev.coll === SYNC_COLL)
+                                pullFromDb();
+                        });
+                    });
+            }
+            function wireSyncUi() {
+                var dot = document.getElementById("syncDot");
+                function paint(st) {
+                    if (!dot || !st) return;
+                    var open = (st.connections || []).some(function (c) {
+                        return c.state === "open";
+                    });
+                    dot.className =
+                        "sync-dot" +
+                        (open ? " on" : st.leaderPresent ? " ready" : "");
+                }
+                try {
+                    SfhaSync.onStatus(paint);
+                    paint(SfhaSync.status());
+                } catch (e) {}
+                window.addEventListener("pagehide", flushNow);
+                document.addEventListener("visibilitychange", function () {
+                    if (document.visibilityState === "hidden") flushNow();
+                });
+            }
+            function showSyncBlocked() {
+                var el = document.createElement("div");
+                el.id = "syncBlocked";
+                el.innerHTML =
+                    "<div><p><b>The sync layer couldn\u2019t be loaded.</b></p>" +
+                    "<p>Your analyses are safe in this browser\u2019s shared sync store, " +
+                    "but the tool needs <code>sync.v1.js</code> from ToolDeck to open them. " +
+                    "Check your connection and try again.</p>" +
+                    '<p><button class="btn" onclick="location.reload()">Retry</button></p></div>';
+                document.body.appendChild(el);
+            }
+            // First paint after the real data is in (or on fallback).
+            function enterApp() {
+                if (LIVE) {
+                    if (liveFirstState)
+                        loadIntoEditor(projectById(projects.mapId), true);
+                    render();
+                    return;
+                }
+                editor.setAttribute("contenteditable", "true");
+                mode = "map";
+                currentId = null;
+                activeTab = "5y";
+                loadIntoEditor(projectById(projects.mapId), true);
+                updateChrome();
+                render();
+                applyHash();
+                scheduleLinkCheck(); // migrated analyses missing from the map
+            }
+            function bootStore() {
+                // The app boots synchronously on a placeholder map; saving is
+                // off (storeMode "pending") until the real store is ready.
+                projects = placeholderProjects("Loading\u2026");
+                if (!LIVE) editor.setAttribute("contenteditable", "false");
+                var btn = document.getElementById("syncBtn");
+                if (btn)
+                    btn.onclick = function () {
+                        if (storeMode === "sync") SfhaSync.openPanel();
+                        else showToast("Sync isn\u2019t available right now", true);
+                    };
+                loadSyncLib()
+                    .then(function (ok) {
+                        if (!ok) throw new Error("sync library unavailable");
+                        return startSyncStore();
+                    })
+                    .then(function () {
+                        wireSyncUi();
+                        cacheSyncLib();
+                    })
+                    .catch(function (err) {
+                        console.warn("sfha-sync unavailable:", err);
+                        var dot = document.getElementById("syncDot");
+                        if (dot) dot.className = "sync-dot err";
+                        if (localStorage.getItem("ehs5y_sync_migrated") === "1") {
+                            // Data already lives in sfha-sync: never fall back
+                            // to the stale localStorage copy.
+                            storeMode = "blocked";
+                            showSyncBlocked();
+                            return;
+                        }
+                        storeMode = "legacy";
+                        loadLegacyProjects();
+                        showToast(
+                            "Sync unavailable \u2014 working locally on this device",
+                            true,
+                        );
+                    })
+                    .then(function () {
+                        if (storeMode !== "blocked") enterApp();
+                    });
             }
 
             // Replace the editor content with plain text (one div per line).
@@ -7841,7 +8414,8 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                     "<li>Export the diagram to PNG or SVG.</li>" +
                     "</ul>" +
                     "<h3>Version</h3>" +
-                    "<p>V40 &mdash; EHS Analysis Suite (5-Why + ABC/OBM + Timeline, Grid, Risk Matrix, Bowtie, Controls) &middot; self-contained HTML, zero dependencies, works offline.</p>" +
+                    "<p>V41 &mdash; EHS Analysis Suite (5-Why + ABC/OBM + Timeline, Grid, Risk Matrix, Bowtie, Controls) &middot; self-contained HTML, zero dependencies, works offline.</p>" +
+                    "<p>New in V41: analyses live in the shared <b>sfha-sync</b> store and sync peer-to-peer between your devices and paired contacts &mdash; use the <b>\u21C4 Sync</b> button to pair. Theme and layout preferences stay per device.</p>" +
                     "<p>New in V40: paste auto-converts any indentation style (spaces, bullets, numbered lists, repeated hyphens) to tabs; <kbd>Shift+Tab</kbd> outdents; <kbd>Tab</kbd> indents multi-line selections; redo; typing is now captured by undo. New Tripod Beta tool; bowtie escalation factors redesigned with their own barriers.</p>" +
                     '<p style="margin-top:10px;color:#858585;font-size:12px;">&copy; J. Overdevest</p>';
             }
@@ -8485,7 +9059,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                 document.getElementById("theme").textContent =
                     "\u2600\uFE0F Light";
             }
-            loadProjects();
+            bootStore(); // placeholder now; real data arrives async (sfha-sync)
             var dirSel = document.getElementById("direction");
             // Start on the map.
             mode = "map";
