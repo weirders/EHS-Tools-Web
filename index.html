@@ -1923,6 +1923,15 @@
                             >
                                 Import… (adds, never replaces)
                             </button>
+                            <div class="menu-sep"></div>
+                            <button
+                                id="mSync"
+                                class="menu-item"
+                                role="menuitem"
+                                title="Devices, connection status and sync log"
+                            >
+                                ⇄ Sync status…
+                            </button>
                         </div>
                     </div>
                     <input
@@ -2003,6 +2012,7 @@ Burnt product on line 3 @red #Machine \Investigate root cause
                         <button
                             id="syncBtn"
                             class="btn sec"
+                            data-sfha-badge
                             title="Sync with your other devices and contacts"
                         >
                             <span id="syncDot" class="sync-dot"></span>⇄ Sync
@@ -9136,6 +9146,10 @@ Burnt product on line 3 @red #Machine \Investigate root cause
             document.getElementById("mExportSelected").onclick = function () {
                 closeMore();
                 openSelectionModal();
+            };
+            document.getElementById("mSync").onclick = function () {
+                closeMore();
+                document.getElementById("syncBtn").onclick();
             };
             document.getElementById("mImport").onclick = function () {
                 closeMore();
