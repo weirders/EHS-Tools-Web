@@ -9966,5 +9966,6 @@ Burnt product on line 3 @red #Machine \Investigate root cause
 
             window.addEventListener("resize", fitView);
         </script>
-    </body>
+    <script>/* offline shell: see sw.js */ if("serviceWorker" in navigator && location.protocol==="https:") navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw",e));</script>
+</body>
 </html>
